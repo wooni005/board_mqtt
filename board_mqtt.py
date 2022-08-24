@@ -15,14 +15,17 @@ from subprocess import PIPE, Popen
 import logger
 import settings
 
-#System check
-ACTION_NOTHING   = 0
-ACTION_RESTART   = 1
+# System check
+ACTION_NOTHING = 0
+ACTION_RESTART = 1
 
-current_sec_time = lambda: int(round(time.time()))
+
+def current_sec_time():
+    return int(round(time.time()))
+
 
 serverStatus = {"cpuTemp": "0.0", "cpuUsage": "0.0", "totalProcesses": "0.0", "nrOfZombies": "0.0", "swapUsage": "0.0", "diskUsage": "0.0", "memUsage": "0.0"}
-exit = False
+exitThread = False
 pingFailCount = 0
 oldTimeout = current_sec_time()
 checkMsg = 'OK'
@@ -41,23 +44,23 @@ hostnameToServerTopic = {
 hostname = socket.gethostname().lower()
 serverTopic = hostnameToServerTopic[hostname]
 
-mqttTopicCheck  = settings.MQTT_TOPIC_CHECK  % serverTopic
-mqttTopicReport = settings.MQTT_TOPIC_REPORT  % serverTopic
+mqttTopicCheck = settings.MQTT_TOPIC_CHECK % serverTopic
+mqttTopicReport = settings.MQTT_TOPIC_REPORT % serverTopic
 
 
 def signal_handler(_signal, frame):
-    global exit
+    global exitThread
     print('You pressed Ctrl+C!')
-    exit = True
+    exitThread = True
 
 
-#Called by mqtt
-def on_message_check(client, userdata, msgJson):
-    #print("on_message_check: " + msgJson.topic + ": " + str(msgJson.payload))
+# Called by mqtt
+def on_message_check(_client, userdata, msgJson):
+    # print("on_message_check: " + msgJson.topic + ": " + str(msgJson.payload))
     sendCheckReportToHomeLogic(checkFail, checkAction, checkMsg)
 
 
-#Send the report to the Home Logic system checker
+# Send the report to the Home Logic system checker
 def sendCheckReportToHomeLogic(fail, action, msg):
     global checkMsg
     global checkFail
@@ -65,22 +68,22 @@ def sendCheckReportToHomeLogic(fail, action, msg):
 
     checkMsg = msg
     checkFail = fail
-    checkReport['checkFail']   = checkFail
+    checkReport['checkFail'] = checkFail
     checkReport['checkAction'] = checkAction
-    checkReport['checkMsg']    = checkMsg
+    checkReport['checkMsg'] = checkMsg
     mqtt_publish.single(mqttTopicReport, json.dumps(checkReport), qos=1, hostname=settings.MQTT_ServerIP)
 
     # Reset the RFLink Rx timeout timer
     oldTimeout = current_sec_time()
 
 
-#Don't wait for the Home Logic system checker, report it directly
-def sendFailureToHomeLogic(checkAction, checkMsg):
-    sendCheckReportToHomeLogic(True, checkAction, checkMsg)
+# Don't wait for the Home Logic system checker, report it directly
+def sendFailureToHomeLogic(_checkAction, _checkMsg):
+    sendCheckReportToHomeLogic(True, _checkAction, _checkMsg)
 
 
 # The callback for when the client receives a CONNACK response from the server.
-def on_connect(client, userdata, flags, rc):
+def on_connect(_client, userdata, flags, rc):
     if rc == 0:
         print(("%s: MQTT Client connected successfully" % (time.ctime(time.time()))))
         client.subscribe([(mqttTopicCheck, 1)])
@@ -88,8 +91,8 @@ def on_connect(client, userdata, flags, rc):
         print(("%s: ERROR: MQTT Client connected with result code %s " % (time.ctime(time.time()), str(rc))))
 
 
-# The callback for when a PUBLISH message is received from the server
-def on_message(client, userdata, msg):
+# The callback for when a published message is received from the server
+def on_message(_client, userdata, msg):
     print(('ERROR: Received ' + msg.topic + ' in on_message function' + str(msg.payload)))
 
 
@@ -99,13 +102,13 @@ def getCpuTemperature():
 
         with open('/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input') as f:
             for line in f:
-                return (float(line.rstrip('\n')) / 1000)
+                return float(line.rstrip('\n')) / 1000
     if os.path.isfile("/sys/devices/virtual/thermal/thermal_zone0/temp"):
         with open('/sys/devices/virtual/thermal/thermal_zone0/temp') as f:
             for line in f:
-                return (float(line.rstrip('\n')) / 1000)
+                return float(line.rstrip('\n')) / 1000
     else:
-    # Otherwise use the RaspberryPi's vcgencmd temp command
+        # Otherwise use the RaspberryPi's vcgencmd temp command
         process = Popen(['vcgencmd', 'measure_temp'], stdout=PIPE)
         output, _error = process.communicate()
         return float(output[output.index(b'=') + 1:output.rindex(b"'")])
@@ -135,7 +138,7 @@ client.connect(settings.MQTT_ServerIP, settings.MQTT_ServerPort, 60)
 client.message_callback_add(mqttTopicCheck, on_message_check)
 client.loop_start()
 
-while not exit:
+while not exitThread:
     readSensorTimer = readSensorTimer + 1
     # Read and send the sensor data every 600s=10min
     if readSensorTimer >= 6:
@@ -143,39 +146,39 @@ while not exit:
 
         # CPU temp
         cpuTemp = getCpuTemperature()
-        #print ("CPU Temp: %s" % cpuTemp)
+        # print ("CPU Temp: %s" % cpuTemp)
 
         time.sleep(1)  # 1s
         # Memory Usage
         mem = psutil.virtual_memory()
         memUsage = 100.0 - float(mem.available) / float(mem.total) * 100.0
         memUsage = round(memUsage, 1)
-        #print ("Memory Usage: %2.1f %%, available: %d %%, total: %d %%" % (memUsage, mem.available, mem.total))
+        # print ("Memory Usage: %2.1f %%, available: %d %%, total: %d %%" % (memUsage, mem.available, mem.total))
 
         time.sleep(1)  # 2s
         # Disk usage disk "/"
         diskUsage = psutil.disk_usage('/').percent
-        #print ("Disk Usage: %s" % diskUsage)
+        # print ("Disk Usage: %s" % diskUsage)
 
         time.sleep(1)  # 3s
         # CPU Usage Meet 1 sec
         cpuUsage = psutil.cpu_percent(interval=1)
-        #print ("CPU Usage: %s" % cpuUsage)
+        # print ("CPU Usage: %s" % cpuUsage)
         # print ("-----")
 
         time.sleep(1)  # 4s
         result = subprocess.check_output('ps axo stat,ppid,pid,comm | grep -w defunct | wc -l', shell=True)
         nrOfZombies = int(result.decode().rstrip('\n'))
-        #print("Nr of zombie processes: " + str(nrOfZombies))
+        # print("Nr of zombie processes: " + str(nrOfZombies))
 
         time.sleep(1)  # 5s
         result = subprocess.check_output('ps -A --no-headers | wc -l', shell=True)
         totalProcesses = int(result.decode().rstrip('\n'))
-        #print("Total Nr of processes: " + str(totalProcesses))
+        # print("Total Nr of processes: " + str(totalProcesses))
 
         time.sleep(1)  # 6s
-        #             total       used       free
-        #Swap:       524284          0     524284
+        #              total       used       free
+        # Swap:       524284          0     524284
         result = subprocess.check_output("free | grep 'Swap'", shell=True)
         i = 0
         swap = [0] * 4
@@ -185,10 +188,10 @@ while not exit:
                 i = i + 1
         if swap[0] != 0:
             swapUsage = (swap[1] / swap[0]) * 100
-            #print("swapUsage: %1.0f%%" % (swapUsage))
+            # print("swapUsage: %1.0f%%" % (swapUsage))
         else:
             swapUsage = -1
-            #print("swapUsage not active")
+            # print("swapUsage not active")
 
         time.sleep(1)  # 7s
         serverStatus['cpuTemp'] = cpuTemp
