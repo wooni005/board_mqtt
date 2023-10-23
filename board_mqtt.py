@@ -34,11 +34,10 @@ checkAction = ACTION_NOTHING
 checkReport = {}
 
 hostnameToServerTopic = {
-    'cb2-live':   'CB2Live',
     'rpi-home':   'RPiHome',
     'rpi-infra':  'RPiInfra',
     'rpi-video1': 'RPiVideo1',
-    'rpi-video2': 'RPiVideo2'
+    'rpi-tv':       'RPiTV'
 }
 
 hostname = socket.gethostname().lower()
